@@ -1,0 +1,145 @@
+#import cv2 as cv
+#import numpy as np
+
+
+#from imutils.object_detection import non_max_suppression
+#import os
+#from openvino.inference_engine import IENetwork, IEPlugin
+
+
+import requests
+from PIL import Image
+from io import BytesIO
+import cv2 as cv
+import numpy as np
+import os
+import sys
+import math
+from scipy import spatial
+from openvino.inference_engine import IENetwork, IEPlugin
+import matplotlib.pyplot as plt
+
+
+
+
+model_bin = "face-detection-adas-0001.bin"
+model_xml = "face-detection-adas-0001.xml"
+
+net = IENetwork(model=model_xml, weights=model_bin)
+
+model_bin_2 = "face-reidentification-retail-0095.bin"
+model_xml_2 = "face-reidentification-retail-0095.xml"
+
+net_2 = IENetwork(model=model_xml_2, weights=model_bin_2)
+
+
+#net = cv.dnn.readNet('face-detection-adas-0001.xml', 'face-detection-adas-0001.bin')
+# Specify target device.
+#net.setPreferableTarget(cv.dnn.DNN_TARGET_MYRIAD)
+
+
+plugin =IEPlugin(device="CPU")
+plugin.add_cpu_extension("/Users/triwibowo/inference_engine_samples_build/intel64/Release/lib/libcpu_extension.dylib") #dylib
+
+
+
+
+exec_net = plugin.load(network=net)
+exec_net_2 = plugin.load(network=net_2)
+
+#image = "/Users/triwibowo/Documents/yong.jpeg"
+image = "/Users/triwibowo/Documents/bowo.png"
+
+img = cv.imread(image)
+gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+
+input_blob_2 = next(iter(net_2.inputs))
+out_blob_2 = next(iter(net_2.outputs))
+n1, c1, h1, w1 = net_2.inputs[input_blob_2].shape
+
+in_cropped = cv.resize(img, (w1, h1))
+in_cropped = in_cropped.transpose((2, 0, 1))
+in_cropped = in_cropped.reshape((n1, c1, h1, w1))
+    
+    
+exec_net_2.start_async(request_id=0, inputs={input_blob_2: in_cropped})
+
+if exec_net_2.requests[0].wait(-1) == 0:
+    bowo = exec_net_2.requests[0].outputs[out_blob_2]
+
+cap = cv.VideoCapture(0)
+
+while (True):
+    ret, frame = cap.read()
+    #gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+
+
+#cobain
+    input_blob = next(iter(net.inputs))
+    out_blob = next(iter(net.outputs))
+    n, c, h, w = net.inputs[input_blob].shape
+    print("input:{}\noutput:{}".format(net.inputs,net.outputs))
+    print("input.shape:{}\noutput.shape:{}".format(net.inputs[input_blob].shape, net.outputs[out_blob].shape))
+
+    
+
+    
+    
+    in_img = cv.resize(frame, (w, h))
+    in_img = in_img.transpose((2, 0, 1))
+    in_img = in_img.reshape((n, c, h, w))
+    exec_net.start_async(request_id=0, inputs={input_blob: in_img})
+
+    
+    
+
+    init_img = img.copy()
+    img = init_img.copy()
+
+    #init_img2 = img.copy()
+
+    if exec_net.requests[0].wait(-1) == 0:
+        res = exec_net.requests[0].outputs[out_blob]
+        faces = res[0][:, np.where(res[0][0][:, 2] > 0.5)]
+
+    for face in faces[0][0]:
+        img_h, img_w, _ = frame.shape
+        box= face[3:7] * np.array([img_w, img_h, img_w, img_h])
+        (xmin, ymin, xmax, ymax) = box.astype("int")
+        cropped = frame[ ymin:ymax, xmin:xmax ]
+        cv.rectangle(frame, (xmin, ymin), (xmax, ymax), (0, 255, 0), 2)
+        
+        in_cropped = cv.resize(cropped, (w1, h1))
+        in_cropped = in_cropped.transpose((2, 0, 1))
+        in_cropped = in_cropped.reshape((n1, c1, h1, w1))
+
+        
+        exec_net_2.start_async(request_id=0, inputs={input_blob_2: in_cropped})
+        if exec_net_2.requests[0].wait(-1) == 0:
+            res_2 = exec_net_2.requests[0].outputs[out_blob_2]
+        
+#       print (cropped)
+#print (faces)
+# print (res_2)
+        sp = 1 - spatial.distance.cosine(res_2, bowo)
+        print (sp)
+        
+        if sp > 0.2:
+            print ("muka bowo")
+        
+        else:
+            print ("bukan muka bowo")
+        #if sp == exec_net_2(face):
+#print ("Bowo")
+
+        
+        
+    #print (box)
+
+
+        cv.imshow('frame',frame)
+        if cv.waitKey(1) & 0xFF == ord('q'):
+            break
+#cv.waitKey(0)
+cap.release()
+cv.destroyAllWindows()
